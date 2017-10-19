@@ -1,0 +1,3 @@
+* Guides
+
+These are some guides I wrote to doing stuff, mainly with NixOS.
