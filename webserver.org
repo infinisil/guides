@@ -31,7 +31,7 @@ This fails at this time of writing (Update 15 May 2017: Not anymore) with the er
 
 If it finishes successfully, which will take a few minutes, the machine will be restarted automatically, therefore closing the SSH connection. You can press Ctrl-C when you see something like
 
-#+BEGIN_SRC
+#+BEGIN_SRC source
 Installation finished. No error reported.
 swapoff /tmp/nixos-infect.hUuad.swp
 removed ‘/tmp/nixos-infect.hUuad.swp’
@@ -45,7 +45,7 @@ ssh root@<ip>
 
 Since the SSH host has changed, you'll get a fat warning, which contains the line:
 
-#+BEGIN_SRC
+#+BEGIN_SRC source
 Offending ECDSA key in $HOME/.ssh/known_hosts:<some number>
 #+END_SRC
 
