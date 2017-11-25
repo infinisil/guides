@@ -1,38 +1,90 @@
-* Getting ZFS on a DO droplet's main disk with NixOS
+* Installing NixOS on a server while changing the root filesystem
 
-- Use a Debian Droplet with at least 1GB RAM
-- Use clever's kexec, with the following changes to the configuration.nix:
-  - add "net.ifnames=0" to boot.kernelParams
-  - Remove the autostart systemd timer and service
-  - Add to the networking section:
-    #+BEGIN_SRC nix
-    defaultGateway = "x.x.x.x";
-    nameservers = [ "8.8.8.8" ];
-    interfaces.eth0 = {
-      ipAddress = "y.y.y.y";
-      prefixLength = z;
+Usually when installing NixOS, you boot from an external USB device containing the installer, which makes it easy to change the underlying filesystem. On a remote server however, this is usually not possible. This guide shows you how you can still make it work. Here it is shown with a DigitalOcean (DO) droplet initially running Debian, then replacing the original filesystem with ZFS and installing NixOS on it.
+
+The trick to making this work is by building a [[https://en.wikipedia.org/wiki/][kexec]] compatible ramdisk NixOS system locally, transfering it to the server and use the ~kexec~ command to boot into it. Then we can install NixOS like normal.
+
+** Requirements
+
+To follow this guide you need a server with:
+
+- A running Linux installation (This guide uses Debian)
+- At least 1GB of RAM
+- root ssh access
+- The same architecture as your local machine
+
+Note: If you need a $5 DO droplet which only has 500MB of RAM, get a higher tier one temporarily and resize it to your desired size later. To be able to resize it, the installation droplet needs to have less than or equal amounts of disk space than your target size. E.g. get the $15 droplet which has 20GB of disk space like the $5 one (but the $10 one currently doesn't work as it has 30GB disk space).
+
+** Building the system
+
+To create the installation system, we use [[https://github.com/cleverca22/nix-tests/tree/master/kexec][cleverca22's kexec config]] with some modifications. Clone the repository and create a file ~myconfig.nix~ with the following contents:
+
+#+BEGIN_SRC nix
+  {
+    imports = [
+      ./configuration.nix
+    ];
+
+    # Make it use predictable interface names starting with eth0
+    boot.kernelParams = [ "net.ifnames=0" ];
+
+    networking = {
+      defaultGateway = "x.x.x.x";
+      # Use google's public DNS server
+      nameservers = [ "8.8.8.8" ];
+      interfaces.eth0 = {
+        ipAddress = "y.y.y.y";
+        prefixLength = z;
+      };
     };
-    #+END_SRC
-    where x is the default gateway, y is the ip and z the mask length, all available through the DO console
-  - Your SSH key(s)
-- Build and put it on the machine:
-#+BEGIN_SRC bash
-nix-build '<nixpkgs/nixos>' -A config.system.build.kexec_tarball -I nixos-config=./configuration.nix -Q -j 4
-scp result/tarball/nixos-system-x86_64-linux.tar.xz root@y.y.y.y:/
+
+    kexec.autoReboot = false;
+
+    users.users.root.openssh.authorizedKeys.keys = [
+      "ssh-rsa ..."
+    ];
+  }
 #+END_SRC
 
-- Login via SSH, untar the file and run the script:
+Replace ~x.x.x.x~ with your servers IPv4 gateway, ~y.y.y.y~ with its IPv4 address and ~z~ with the subnet mask prefix. In DigitalOcean, you can find this info in your droplet's Networking tab in the Public Network section. Finally, put your ssh public key in the ~users.users.root.openssh.authorizedKeys.keys~ option.
+
+Build the system configuration with
+
 #+BEGIN_SRC bash
-ssh root@y.y.y.y
-cd /
-apt-get install xz-utils
-tar -xf nixos-system-x86_64-linux.tar.xz
-./kexec-nixos
+  nix-build '<nixpkgs/nixos>' -A config.system.build.kexec_tarball -I nixos-config=./myconfig.nix -Q
 #+END_SRC
 
-- Wait for the ~+ kexec -e~ line then terminate the ssh connection
-- Reconnect with SSH, you should now see a running nixos system to use for installing. You need to remove the ip's line in ~/.ssh/known_hosts for this to work.
-- repartition your main disk using ~fdisk~, to such a configuration:
+This may take a while. When it finishes you will find the finished system as a tarball in ~./result/tarball~.
+
+** Starting the built NixOS system on the server
+
+Transfer the tarball to the server and ssh into it
+#+BEGIN_SRC bash
+  scp result/tarball/nixos-system-x86_64-linux.tar.xz root@y.y.y.y:.
+  ssh root@y.y.y.y
+#+END_SRC
+
+Then unpack the tarball and run the kexec script
+
+#+BEGIN_SRC bash
+  cd /
+  apt-get update && apt-get install xz-utils # Needed to unpack on Debian 9
+  tar -xf ~/nixos-system-x86_64-linux.tar.gz
+  ./kexec_nixos
+#+END_SRC
+
+Wait until the ~+ kexec -e~ line shows up, then terminate the ssh connection (press RET ~ . in sequence). Wait until you have a ping again by doing ~ping y.y.y.y~. Reconnect with ssh, you should see a warning about the host identification having changed, which is a good sign in our case. Remove your server's previous entry in ~~/.ssh/known_hosts~ and try again. If everything worked, you should now see the ~[root@kexec:~]#~ prompt. You're now running NixOS entirely in RAM!
+
+** Installing NixOS
+
+Install NixOS like normal, and make sure to include the following:
+
+- ~boot.kernelParams = [ "net.ifnames=0" ];~
+- The same network configuration from above
+
+*** Example installation with ZFS
+
+Repartition your main disk using ~fdisk~ to such a configuration (you can remove all previous partitions):
 #+BEGIN_SRC example
 /dev/vda1 1M BIOS boot partition (BIOS boot)
 /dev/vda2 200M boot partition (EFI System)
@@ -40,39 +92,70 @@ tar -xf nixos-system-x86_64-linux.tar.xz
 /dev/vda4 rest, zfs partition (Linux Filesystem)
 #+END_SRC
 
-- Create the file systems:
+Create the file systems:
 #+BEGIN_SRC bash
 mkfs.ext4 /dev/vda2
 mkswap /dev/vda3
-zpool create -O compress=on -O mountpoint=legacy main /dev/vda4
-zfs create -o xattr=off -o atime=off main/nix
+zpool create -O compress=on -O mountpoint=legacy tank /dev/vda4
+zfs create -o xattr=off -o atime=off tank/nix
 #+END_SRC
 
-- Mount them:
+Mount them:
 #+BEGIN_SRC bash
 swapon /dev/vda3
-mkdir /mnt
-mount -t zfs main /mnt
+mount -t zfs tank /mnt
 mkdir /mnt/boot /mnt/nix
-mount -t zfs main/nix /mnt/nix
+mount -t zfs tank/nix /mnt/nix
 mount /dev/vda2 /mnt/boot
 #+END_SRC
 
-- Generate the configs:
+Generate the configs:
 #+BEGIN_SRC bash
 nixos-generate-config --root /mnt
 #+END_SRC
 
-- Edit /mnt/etc/nixos/configuration.nix so that it includes at least:
-  - The same network config from above
-  - A hostId (needed for zfs)
-  - Your ssh keys
-  - services.openssh.enable = true
-  - boot.kernelParams = [ "net.ifnames=0" ];
-  - boot.grub.loader.device = "/dev/vda";
-  - boot.zfs.devNodes = "/dev";
-- Install nixos and cross fingers:
+Edit ~/mnt/etc/nixos/configuration.nix~ to something like this:
+
+#+BEGIN_SRC nix
+  { config, pkgs, ... }:
+
+  {
+    imports =
+      [
+        ./hardware-configuration.nix
+      ];
+
+    boot.loader.grub.enable = true;
+    boot.loader.grub.version = 2;
+
+    boot.kernelParams = [ "net.ifnames=0" ];
+
+    boot.zfs.devNodes = "/dev";
+    boot.loader.grub.device = "/dev/vda";
+
+    networking = {
+      hostName = "foobar";
+      hostId = "12345678";
+      defaultGateway = "x.x.x.x";
+      nameservers = [ "8.8.8.8" ];
+      interfaces.eth0 = {
+        ipAddress = "y.y.y.y";
+        prefixLength = z;
+      };
+    };
+
+    services.openssh.enable = true;
+
+    users.users.root.openssh.authorizedKeys.keys = [
+      "ssh-rsa ..."
+    ];
+
+    system.stateVersion = "18.03"; # Did you read the comment?
+  }
+#+END_SRC
+
+And finally, install nixos and cross fingers:
 #+BEGIN_SRC bash
-nixos-install
-reboot
+  nixos-install
+  reboot
 #+END_SRC
