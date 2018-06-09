@@ -13,7 +13,7 @@ You can find valid values for these options in =$(nix-build --no-out-link '<nixp
 
 ** Advanced
 
-If the above options aren't enough, you can instead create your own keyboard layout by going through xkb. To get started, install =xorg.setxkbmap= and =xorg.xkbcomp=. Run =setxkbmap -print > layout.xkb= to get an initial file. This corresponds to your current layout. Use =xkbcomp layout.xkb $DISPLAY= to load the layout. Refer to https://wiki.archlinux.org/index.php/X_KeyBoard_extension on how to edit this file.
+If the above options aren't enough, you can instead create your own keyboard layout by going through xkb. To get started, install =xorg.xkbcomp= and run =setxkbmap -print > layout.xkb= to get an initial file. This corresponds to your current layout. Use =xkbcomp layout.xkb $DISPLAY= to load the file as your new layout. Refer to https://wiki.archlinux.org/index.php/X_KeyBoard_extension on how to edit this file.
 
 Lots of examples can be found in =$(nix-build --no-out-link '<nixpkgs>' -A xorg.xkeyboardconfig)/etc/X11/xkb/=. For available key symbols, see =$(nix-build --no-out-link '<nixpkgs>' -A xorg.xproto)/include/X11/keysymdef.h=.
 
