@@ -1,0 +1,33 @@
+* Keyboard Layout Customization
+
+** Simple
+
+The easiest way to customize your keyboard layout on NixOS is with these options:
+
+- =services.xserver.layout=: Keyboard layout, or multiple keyboard layouts separated by commas.
+- =services.xserver.xkbVariant=: X keyboard variant
+- =services.xserver.xkbModel=: Keyboard model.
+- =services.xserver.xkbOptions=: X keyboard options; layout switching goes here.
+
+You can find valid values for these options in =$(nix-build --no-out-link '<nixpkgs>' -A xorg.xkeyboardconfig)/etc/X11/xkb/rules/base.lst=
+
+** Advanced
+
+If the above options aren't enough, you can instead create your own keyboard layout by going through xkb. To get started, install =xorg.setxkbmap= and =xorg.xkbcomp=. Run =setxkbmap -print > layout.xkb= to get an initial file. This corresponds to your current layout. Use =xkbcomp layout.xkb $DISPLAY= to load the layout. Refer to https://wiki.archlinux.org/index.php/X_KeyBoard_extension on how to edit this file.
+
+Lots of examples can be found in =$(nix-build --no-out-link '<nixpkgs>' -A xorg.xkeyboardconfig)/etc/X11/xkb/=. For available key symbols, see =$(nix-build --no-out-link '<nixpkgs>' -A xorg.xproto)/include/X11/keysymdef.h=.
+
+To load this file at the start of the X session, add this to your =configuration.nix=:
+
+#+BEGIN_SRC nix
+  services.xserver.displayManager.sessionCommands = "${pkgs.xorg.xkbcomp}/bin/xkbcomp ${/path/to/layout.xkb} $DISPLAY";
+#+END_SRC
+
+** Relevant other options
+
+- =services.xserver.exportConfiguration=: Makes it so the above mentioned xkb directory (and the =xorg.conf= file) gets exported to =/etc/X11/xkb=, which is useful if you have to often look stuff up in it.
+- =services.xserver.xkbDir=: Allows you to set a different xkb directory altogether. All the above mentioned things will use this instead of the default one in regards to xkb stuff.
+- =i18n.consoleUseXkbConfig=: Makes it so the tty console has about the same layout as the one configured in the =services.xserver= options.
+
+** Configs
+- https://github.com/Infinisil/system/blob/master/config/new-modules/keylayout.nix
